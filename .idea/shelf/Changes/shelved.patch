@@ -1,0 +1,240 @@
+Index: src/DataManipulator.ts
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import { ServerRespond } from './DataStreamer';\r\n\r\nexport interface Row {\r\n  stock: string,\r\n  top_ask_price: number,\r\n  timestamp: Date,\r\n}\r\n\r\n\r\nexport class DataManipulator {\r\n  static generateRow(serverResponds: ServerRespond[]) {\r\n    return serverResponds.map((el: any) => {\r\n      return {\r\n        stock: el.stock,\r\n        top_ask_price: el.top_ask && el.top_ask.price || 0,\r\n        timestamp: el.timestamp,\r\n      };\r\n    })\r\n  }\r\n}\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/DataManipulator.ts b/src/DataManipulator.ts
+--- a/src/DataManipulator.ts	(revision c5f96eae3674c6c8f229a651d25d0d1cc3b21842)
++++ b/src/DataManipulator.ts	(date 1672234478019)
+@@ -1,20 +1,35 @@
+ import { ServerRespond } from './DataStreamer';
+ 
+ export interface Row {
+-  stock: string,
+-  top_ask_price: number,
+-  timestamp: Date,
++
++  price_abc: number,
++  price_def:number,
++  ratio:number,
++  timestamp:Date,
++  upper_bound: number,
++  lower_bound:number,
++  trigger_alert:number|undefined,
+ }
+ 
+ 
+ export class DataManipulator {
+-  static generateRow(serverResponds: ServerRespond[]) {
+-    return serverResponds.map((el: any) => {
+-      return {
+-        stock: el.stock,
+-        top_ask_price: el.top_ask && el.top_ask.price || 0,
+-        timestamp: el.timestamp,
+-      };
+-    })
++
++  static generateRow(serverRespond: ServerRespond[]): Row {
++    const priceAbc = (serverRespond[0].top_ask.price + serverRespond[0].top_bid.price) / 2;
++    const priceDEF = (serverRespond[1].top_ask.price + serverRespond[1].top_bid.price) / 2;
++    const ratio = priceAbc / priceDEF;
++    const upperBound = 1 + 0.05;
++    const lowerBound = 1 - 0.05;
++
++    return {
++      price_abc: priceAbc,
++      price_def: priceDEF,
++      ratio,
++      timestamp: serverRespond[0].timestamp > serverRespond[1].timestamp ?
++          serverRespond[0].timestamp : serverRespond[1].timestamp,
++      upper_bound: upperBound,
++      lower_bound: lowerBound,
++      trigger_alert: (ratio > upperBound || ratio < lowerBound) ? ratio : undefined,
++    };
+   }
+-}
++}
+\ No newline at end of file
+Index: src/Graph.tsx
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>import React, { Component } from 'react';\r\nimport { Table } from '@finos/perspective';\r\nimport { ServerRespond } from './DataStreamer';\r\nimport { DataManipulator } from './DataManipulator';\r\nimport './Graph.css';\r\n\r\ninterface IProps {\r\n  data: ServerRespond[],\r\n}\r\n\r\ninterface PerspectiveViewerElement extends HTMLElement {\r\n  load: (table: Table) => void,\r\n}\r\nclass Graph extends Component<IProps, {}> {\r\n  table: Table | undefined;\r\n\r\n  render() {\r\n    return React.createElement('perspective-viewer');\r\n  }\r\n\r\n  componentDidMount() {\r\n    // Get element from the DOM.\r\n    const elem = document.getElementsByTagName('perspective-viewer')[0] as unknown as PerspectiveViewerElement;\r\n\r\n    const schema = {\r\n      stock: 'string',\r\n      top_ask_price: 'float',\r\n      top_bid_price: 'float',\r\n      timestamp: 'date',\r\n    };\r\n\r\n    if (window.perspective && window.perspective.worker()) {\r\n      this.table = window.perspective.worker().table(schema);\r\n    }\r\n    if (this.table) {\r\n      // Load the `table` in the `<perspective-viewer>` DOM reference.\r\n      elem.load(this.table);\r\n      elem.setAttribute('view', 'y_line');\r\n      elem.setAttribute('column-pivots', '[\"stock\"]');\r\n      elem.setAttribute('row-pivots', '[\"timestamp\"]');\r\n      elem.setAttribute('columns', '[\"top_ask_price\"]');\r\n      elem.setAttribute('aggregates', JSON.stringify({\r\n        stock: 'distinctcount',\r\n        top_ask_price: 'avg',\r\n        top_bid_price: 'avg',\r\n        timestamp: 'distinct count',\r\n      }));\r\n    }\r\n  }\r\n\r\n  componentDidUpdate() {\r\n    if (this.table) {\r\n      this.table.update(\r\n        DataManipulator.generateRow(this.props.data),\r\n      );\r\n    }\r\n  }\r\n}\r\n\r\nexport default Graph;\r\n
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/Graph.tsx b/src/Graph.tsx
+--- a/src/Graph.tsx	(revision c5f96eae3674c6c8f229a651d25d0d1cc3b21842)
++++ b/src/Graph.tsx	(date 1672235186153)
+@@ -1,5 +1,5 @@
+ import React, { Component } from 'react';
+-import { Table } from '@finos/perspective';
++import {Table, TableData} from '@finos/perspective';
+ import { ServerRespond } from './DataStreamer';
+ import { DataManipulator } from './DataManipulator';
+ import './Graph.css';
+@@ -23,10 +23,13 @@
+     const elem = document.getElementsByTagName('perspective-viewer')[0] as unknown as PerspectiveViewerElement;
+ 
+     const schema = {
+-      stock: 'string',
+-      top_ask_price: 'float',
+-      top_bid_price: 'float',
++      price_abc: 'float',
++      price_def:'float',
++      ratio:'float',
+       timestamp: 'date',
++      upper_bound:'float',
++      lower_bound:'float',
++      trigger_alert:'float',
+     };
+ 
+     if (window.perspective && window.perspective.worker()) {
+@@ -36,25 +39,26 @@
+       // Load the `table` in the `<perspective-viewer>` DOM reference.
+       elem.load(this.table);
+       elem.setAttribute('view', 'y_line');
+-      elem.setAttribute('column-pivots', '["stock"]');
+       elem.setAttribute('row-pivots', '["timestamp"]');
+-      elem.setAttribute('columns', '["top_ask_price"]');
++      elem.setAttribute('columns', '["ratio","lower_bound","upper_bound","trigger_alert"]');
+       elem.setAttribute('aggregates', JSON.stringify({
+-        stock: 'distinctcount',
+-        top_ask_price: 'avg',
+-        top_bid_price: 'avg',
++        price_abc:'avg',
++        price_def:'avg',
+         timestamp: 'distinct count',
++        upper_bound:'avg',
++        lower_bound:'avg',
++        trigger_alert:'avg',
+       }));
+     }
+   }
+ 
+   componentDidUpdate() {
+     if (this.table) {
+-      this.table.update(
+-        DataManipulator.generateRow(this.props.data),
+-      );
++      this.table.update([
++
++          DataManipulator.generateRow(this.props.data),]as unknown as TableData);
++      console.log("rftghnjmk");
+     }
+   }
+ }
+-
+ export default Graph;
+Index: .idea/misc.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/misc.xml b/.idea/misc.xml
+new file mode 100644
+--- /dev/null	(date 1672231244827)
++++ b/.idea/misc.xml	(date 1672231244827)
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.11 (jpmc-task-3)" project-jdk-type="Python SDK" />
++</project>
+\ No newline at end of file
+Index: .idea/jpmc-task-3.iml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/jpmc-task-3.iml b/.idea/jpmc-task-3.iml
+new file mode 100644
+--- /dev/null	(date 1672231244799)
++++ b/.idea/jpmc-task-3.iml	(date 1672231244799)
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<module type="PYTHON_MODULE" version="4">
++  <component name="NewModuleRootManager">
++    <content url="file://$MODULE_DIR$">
++      <excludeFolder url="file://$MODULE_DIR$/venv" />
++    </content>
++    <orderEntry type="inheritedJdk" />
++    <orderEntry type="sourceFolder" forTests="false" />
++  </component>
++  <component name="PyDocumentationSettings">
++    <option name="format" value="PLAIN" />
++    <option name="myDocStringFormat" value="Plain" />
++  </component>
++</module>
+\ No newline at end of file
+Index: .idea/modules.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/modules.xml b/.idea/modules.xml
+new file mode 100644
+--- /dev/null	(date 1672231121367)
++++ b/.idea/modules.xml	(date 1672231121367)
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="ProjectModuleManager">
++    <modules>
++      <module fileurl="file://$PROJECT_DIR$/.idea/jpmc-task-3.iml" filepath="$PROJECT_DIR$/.idea/jpmc-task-3.iml" />
++    </modules>
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/vcs.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/vcs.xml b/.idea/vcs.xml
+new file mode 100644
+--- /dev/null	(date 1672231121386)
++++ b/.idea/vcs.xml	(date 1672231121386)
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project version="4">
++  <component name="VcsDirectoryMappings">
++    <mapping directory="$PROJECT_DIR$" vcs="Git" />
++  </component>
++</project>
+\ No newline at end of file
+Index: .idea/inspectionProfiles/profiles_settings.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/inspectionProfiles/profiles_settings.xml b/.idea/inspectionProfiles/profiles_settings.xml
+new file mode 100644
+--- /dev/null	(date 1672231121411)
++++ b/.idea/inspectionProfiles/profiles_settings.xml	(date 1672231121411)
+@@ -0,0 +1,6 @@
++<component name="InspectionProjectProfileManager">
++  <settings>
++    <option name="USE_PROJECT_PROFILE" value="false" />
++    <version value="1.0" />
++  </settings>
++</component>
+\ No newline at end of file
+Index: .idea/.gitignore
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/.gitignore b/.idea/.gitignore
+new file mode 100644
+--- /dev/null	(date 1672231121699)
++++ b/.idea/.gitignore	(date 1672231121699)
+@@ -0,0 +1,8 @@
++# Default ignored files
++/shelf/
++/workspace.xml
++# Editor-based HTTP Client requests
++/httpRequests/
++# Datasource local storage ignored files
++/dataSources/
++/dataSources.local.xml
